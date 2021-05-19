@@ -77,6 +77,7 @@ def report_data_info(rank, queue):
     })
 
     clientIdToRun = torch.zeros([world_size - 1], dtype=torch.int).to(device=device)
+    # hts: corresponds to line 102 in the server process
     dist.broadcast(tensor=clientIdToRun, src=0)
     nextClientIds = [clientIdToRun[args.this_rank - 1].item()]
 
@@ -407,6 +408,7 @@ def run(rank, model, queue, param_q, stop_flag, client_cfg):
     model = model.to(device=device)
 
     for idx, param in enumerate(model.parameters()):
+        # receive model weights from parameter server
         dist.broadcast(tensor=param.data, src=0)
 
     if args.load_model:
@@ -559,6 +561,7 @@ def run(rank, model, queue, param_q, stop_flag, client_cfg):
 
             # receive current minimum step, and the clientIdLen for next training
             step_tensor = torch.zeros([world_size], dtype=torch.int).to(device=device)
+            # hts: receive step_tensor from parameter server.
             dist.broadcast(tensor=step_tensor, src=0)
             globalMinStep = step_tensor[0].item()
             totalLen = step_tensor[-1].item()
@@ -652,6 +655,7 @@ if __name__ == "__main__":
 
     # Initialize PS - client communication channel
     world_size = len(workers) + 1
+    # this rank is a unique id of this worker process
     this_rank = args.this_rank
     dist.init_process_group(args.backend, rank=this_rank, world_size=world_size)
 

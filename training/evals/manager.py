@@ -62,6 +62,7 @@ def process_cmd(yaml_file):
     learner_conf = '-'.join([str(_) for _ in list(range(1, sum(total_gpus)+1))])
     # =========== Submit job to parameter server ============
     running_vms.add(ps_ip)
+    # hts: something like "--learner 1-2-3-4" where 4 is the total number of GPUs.
     ps_cmd = f" python {yaml_conf['exp_path']}/param_server.py {conf_script} --this_rank=0 --learner={learner_conf} "
 
     with open(f"{job_name}_logging", 'wb') as fout:

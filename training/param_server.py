@@ -6,12 +6,12 @@ initiate_aggregator_setting()
 
 for i in range(torch.cuda.device_count()):
     try:
-        device = torch.device('cuda:'+str(i))
+        device = torch.device('cuda:' + str(i))
         torch.cuda.set_device(i)
         logging.info(f'End up with cuda device {torch.rand(1).to(device=device)}')
         break
     except Exception as e:
-        assert i != torch.cuda.device_count()-1, 'Can not find a feasible GPU'
+        assert i != torch.cuda.device_count() - 1, 'Can not find a feasible GPU'
 
 entire_train_data = None
 sample_size_dic = {}
@@ -20,12 +20,15 @@ sampledClientSet = set()
 
 os.environ['MASTER_ADDR'] = args.ps_ip
 os.environ['MASTER_PORT'] = args.ps_port
-#os.environ['NCCL_DEBUG'] = 'INFO'
+
+
+# os.environ['NCCL_DEBUG'] = 'INFO'
 
 def initiate_sampler_query(queue, numOfClients):
     # Initiate the clientSampler
     if args.sampler_path is None:
-        client_sampler = clientSampler(args.sample_mode, args.score_mode, args=args, filter=args.filter_less, sample_seed=args.sample_seed)
+        client_sampler = clientSampler(args.sample_mode, args.score_mode, args=args, filter=args.filter_less,
+                                       sample_seed=args.sample_seed)
     else:
         # load sampler
         with open(args.sampler_path, 'rb') as loader:
@@ -58,12 +61,13 @@ def initiate_sampler_query(queue, numOfClients):
 
                 for index, dis in enumerate(distanceVec):
                     # since the worker rankId starts from 1, we also configure the initial dataId as 1
-                    mapped_id = max(1, clientId%num_client_profile)
-                    systemProfile = global_client_profile[mapped_id] if mapped_id in global_client_profile else [1.0, 1.0]
+                    mapped_id = max(1, clientId % num_client_profile)
+                    systemProfile = global_client_profile[mapped_id] if mapped_id in global_client_profile else [1.0,
+                                                                                                                 1.0]
                     client_sampler.registerClient(rank_src, clientId, dis, sizeVec[index], speed=systemProfile)
                     client_sampler.registerDuration(clientId,
-                        batch_size=args.batch_size, upload_epoch=args.upload_epoch,
-                        model_size=args.model_size)
+                                                    batch_size=args.batch_size, upload_epoch=args.upload_epoch,
+                                                    model_size=args.model_size)
 
                     clientId += 1
 
@@ -75,9 +79,11 @@ def initiate_sampler_query(queue, numOfClients):
 
     return client_sampler
 
+
 def init_myprocesses(rank, size, model, queue, param_q, stop_signal, fn, backend):
     global sampledClientSet
-
+    # hts: backend: the protocal for communication between multiple processes
+    # rank is the rank of this process, i.e., rank of the master node
     dist.init_process_group(backend, rank=rank, world_size=size)
 
     # After collecting all data information, then decide the clientId to run
@@ -86,25 +92,26 @@ def init_myprocesses(rank, size, model, queue, param_q, stop_signal, fn, backend
 
     clientIdsToRun = []
     for wrank in workerRanks:
+        # still unclear what is the meaning of this function
         nextClientIdToRun = clientSampler.nextClientIdToRun(hostId=wrank)
         clientSampler.clientOnHost([nextClientIdToRun], wrank)
         clientIdsToRun.append([nextClientIdToRun])
         sampledClientSet.add(nextClientIdToRun)
-
     clientTensor = torch.tensor(clientIdsToRun, dtype=torch.int, device=device)
+    # hts: corresponds to line 81 "clientIdToRun" in the worker process
     dist.broadcast(tensor=clientTensor, src=0)
 
     # Start the PS service
     fn(model, queue, param_q, stop_signal, clientSampler)
 
-def prune_client_tasks(clientSampler, sampledClientsRealTemp, numToRealRun, global_virtual_clock):
 
+def prune_client_tasks(clientSampler, sampledClientsRealTemp, numToRealRun, global_virtual_clock):
     sampledClientsReal = []
     # 1. remove dummy clients that are not available to the end of training
     for virtualClient in sampledClientsRealTemp:
         roundDuration = clientSampler.getCompletionTime(virtualClient,
-                                batch_size=args.batch_size, upload_epoch=args.upload_epoch,
-                                model_size=args.model_size) * args.clock_factor
+                                                        batch_size=args.batch_size, upload_epoch=args.upload_epoch,
+                                                        model_size=args.model_size) * args.clock_factor
 
         if clientSampler.isClientActive(virtualClient, roundDuration + global_virtual_clock):
             sampledClientsReal.append(virtualClient)
@@ -114,13 +121,13 @@ def prune_client_tasks(clientSampler, sampledClientsRealTemp, numToRealRun, glob
     virtual_client_clock = {}
     for virtualClient in sampledClientsReal:
         roundDuration = clientSampler.getCompletionTime(virtualClient,
-                                batch_size=args.batch_size, upload_epoch=args.upload_epoch,
-                                model_size=args.model_size) * args.clock_factor
+                                                        batch_size=args.batch_size, upload_epoch=args.upload_epoch,
+                                                        model_size=args.model_size) * args.clock_factor
         completionTimes.append(roundDuration)
         virtual_client_clock[virtualClient] = roundDuration
 
     # 3. get the top-k completions
-    sortedWorkersByCompletion = sorted(range(len(completionTimes)), key=lambda k:completionTimes[k])
+    sortedWorkersByCompletion = sorted(range(len(completionTimes)), key=lambda k: completionTimes[k])
     top_k_index = sortedWorkersByCompletion[:numToRealRun]
     clients_to_run = [sampledClientsReal[k] for k in top_k_index]
 
@@ -129,6 +136,7 @@ def prune_client_tasks(clientSampler, sampledClientsRealTemp, numToRealRun, glob
 
     return clients_to_run, dummy_clients, virtual_client_clock, round_duration
 
+
 def run(model, queue, param_q, stop_signal, clientSampler):
     global logDir, sampledClientSet
 
@@ -136,15 +144,16 @@ def run(model, queue, param_q, stop_signal, clientSampler):
 
     model = model.to(device=device)
 
-    #if not args.load_model:
+    # if not args.load_model:
     for name, param in model.named_parameters():
+        # corresponds to line 412 in the leaner process
         dist.broadcast(tensor=param.data.to(device=device), src=0)
-        #logging.info(f"====Model parameters name: {name}")
+        # logging.info(f"====Model parameters name: {name}")
 
     workers = [int(v) for v in str(args.learners).split('-')]
 
     epoch_train_loss = 0
-    data_size_epoch = 0   # len(train_data), one epoch
+    data_size_epoch = 0  # len(train_data), one epoch
     epoch_count = 1
     global_virtual_clock = 0.
     round_duration = 0.
@@ -190,7 +199,7 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                         'gradient_policy': args.gradient_policy,
                         'task': args.task,
                         'perf': collections.OrderedDict()}
-
+    #hts: break condition: 1. timeout of simulation time 2.exceed the pre-set epoch (not the local epoch, more precisely, should be named "iteration")
     while True:
         if not queue.empty():
             try:
@@ -199,12 +208,13 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                 rank_src = list(tmp_dict.keys())[0]
 
                 [iteration_loss, trained_size, isWorkerEnd, clientIds, speed, testRes, virtualClock] = \
-                [tmp_dict[rank_src][i] for i in range(1, len(tmp_dict[rank_src]))]
-                #clientSampler.registerSpeed(rank_src, clientId, speed)
-
+                    [tmp_dict[rank_src][i] for i in range(1, len(tmp_dict[rank_src]))]
+                # clientSampler.registerSpeed(rank_src, clientId, speed)
+                # hts: isWorkderEnd is only valid when it is the test_only mode.
                 if isWorkerEnd:
                     logging.info("====Worker {} has completed all its data computation!".format(rank_src))
                     learner_staleness.pop(rank_src)
+                    # hts: if all learners have all finished computing (testing), then issue stop_signal to stop all the learners.
                     if (len(learner_staleness) == 0):
                         stop_signal.put(1)
                         break
@@ -229,7 +239,7 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                         # fraction of total samples on this specific node
                         ratioSample = clientSampler.getSampleRatio(clientId, rank_src, args.is_even_avg)
                         delta_ws = delta_wss[i]
-                        #clientWeightsCache[clientId] = [torch.from_numpy(x).to(device=device) for x in delta_ws]
+                        # clientWeightsCache[clientId] = [torch.from_numpy(x).to(device=device) for x in delta_ws]
 
                         epoch_train_loss += ratioSample * iteration_loss[i]
                         isSelected = True if clientId in sampledClientSet else False
@@ -248,7 +258,7 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                                 else:
                                     sumDeltaWeights[idx] += model_weight * ratioSample
 
-                            gradient_l2_norm += ((model_weight-last_model_parameters[idx]).norm(2)**2).item()
+                            gradient_l2_norm += ((model_weight - last_model_parameters[idx]).norm(2) ** 2).item()
 
                         # bias term for global speed
                         virtual_c = virtualClientClock[clientId] if clientId in virtualClientClock else 1.
@@ -256,7 +266,8 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                         size_of_sample_bin = 1.
 
                         if args.capacity_bin == True:
-                            size_of_sample_bin = min(clientSampler.getClient(clientId).size, args.upload_epoch*args.batch_size)
+                            size_of_sample_bin = min(clientSampler.getClient(clientId).size,
+                                                     args.upload_epoch * args.batch_size)
 
                         # register the score
                         clientUtility = math.sqrt(iteration_loss[i]) * size_of_sample_bin
@@ -269,13 +280,15 @@ def run(model, queue, param_q, stop_signal, clientSampler):
 
                         clientSampler.registerScore(clientId, clientUtility, auxi=math.sqrt(iteration_loss[i]),
                                                     time_stamp=epoch_count, duration=virtual_c
-                                      )
+                                                    )
                         if isSelected:
                             received_updates += 1
 
                         avgUtilLastEpoch += ratioSample * clientUtility
 
-                logging.info("====Done handling rank {}, with ratio {}, now collected {} clients".format(rank_src, ratioSample, received_updates))
+                logging.info(
+                    "====Done handling rank {}, with ratio {}, now collected {} clients".format(rank_src, ratioSample,
+                                                                                                received_updates))
 
                 # aggregate the test results
                 updateEpoch = testRes[-1]
@@ -294,15 +307,26 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                         top_5_str = 'top_5: '
 
                         try:
-                            logging.info("====After aggregation in epoch: {}, virtual_clock: {}, {}: {} % ({}), {}: {} % ({}), test loss: {}, test len: {}"
-                                    .format(updateEpoch, global_virtual_clock, top_1_str, round(test_results[updateEpoch][0]/test_results[updateEpoch][3]*100.0, 4),
-                                    test_results[updateEpoch][0], top_5_str, round(test_results[updateEpoch][1]/test_results[updateEpoch][3]*100.0, 4),
-                                    test_results[updateEpoch][1], test_results[updateEpoch][2]/test_results[updateEpoch][3], test_results[updateEpoch][3]))
-                            training_history['perf'][updateEpoch] = {'round': updateEpoch, 'clock': global_virtual_clock,
-                                top_1_str: round(test_results[updateEpoch][0]/test_results[updateEpoch][3]*100.0, 4),
-                                top_5_str: round(test_results[updateEpoch][1]/test_results[updateEpoch][3]*100.0, 4),
-                                'loss': test_results[updateEpoch][2]/test_results[updateEpoch][3],
-                                }
+                            logging.info(
+                                "====After aggregation in epoch: {}, virtual_clock: {}, {}: {} % ({}), {}: {} % ({}), test loss: {}, test len: {}"
+                                .format(updateEpoch, global_virtual_clock, top_1_str,
+                                        round(test_results[updateEpoch][0] / test_results[updateEpoch][3] * 100.0, 4),
+                                        test_results[updateEpoch][0], top_5_str,
+                                        round(test_results[updateEpoch][1] / test_results[updateEpoch][3] * 100.0, 4),
+                                        test_results[updateEpoch][1],
+                                        test_results[updateEpoch][2] / test_results[updateEpoch][3],
+                                        test_results[updateEpoch][3]))
+                            training_history['perf'][updateEpoch] = {'round': updateEpoch,
+                                                                     'clock': global_virtual_clock,
+                                                                     top_1_str: round(test_results[updateEpoch][0] /
+                                                                                      test_results[updateEpoch][
+                                                                                          3] * 100.0, 4),
+                                                                     top_5_str: round(test_results[updateEpoch][1] /
+                                                                                      test_results[updateEpoch][
+                                                                                          3] * 100.0, 4),
+                                                                     'loss': test_results[updateEpoch][2] /
+                                                                             test_results[updateEpoch][3],
+                                                                     }
 
                             with open(os.path.join(logDir, 'training_perf'), 'wb') as fout:
                                 pickle.dump(training_history, fout)
@@ -325,7 +349,7 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                     pendingWorkers[rank_src] = learner_local_step[rank_src]
                     # lock the worker
                     logging.info("Lock worker " + str(rank_src) + " with localStep " + str(pendingWorkers[rank_src]) +
-                                            " , while globalStep is " + str(currentMinStep) + "\n")
+                                 " , while globalStep is " + str(currentMinStep) + "\n")
 
                 # if the local cache is too stale, then update it
                 elif learner_cache_step[rank_src] < learner_local_step[rank_src] - args.stale_threshold:
@@ -348,16 +372,18 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                     # assign avg reward to explored, but not ran workers
                     for clientId in exploredPendingWorkers:
                         clientSampler.registerScore(clientId, avgUtilLastEpoch,
-                                                time_stamp=epoch_count, duration=virtualClientClock[clientId],
-                                                success=False
-                                  )
+                                                    time_stamp=epoch_count, duration=virtualClientClock[clientId],
+                                                    success=False
+                                                    )
 
                     workersToSend = sorted(workersToSend)
                     epoch_count += 1
                     avgUtilLastEpoch = 0.
 
-                    logging.info("====Epoch {} completes {} clients with loss {}, sampled rewards are: \n {} \n=========="
-                                .format(epoch_count, len(clientsLastEpoch), epoch_train_loss, {x:clientSampler.getScore(0, x) for x in sorted(clientsLastEpoch)}))
+                    logging.info(
+                        "====Epoch {} completes {} clients with loss {}, sampled rewards are: \n {} \n=========="
+                        .format(epoch_count, len(clientsLastEpoch), epoch_train_loss,
+                                {x: clientSampler.getScore(0, x) for x in sorted(clientsLastEpoch)}))
 
                     epoch_train_loss = 0.
                     clientsLastEpoch = []
@@ -366,38 +392,40 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                     # resampling the clients if necessary
                     if epoch_count % args.resampling_interval == 0 or epoch_count == 2:
                         logging.info("====Start to sample for epoch {}, global virtualClock: {}, round_duration: {}"
-                                        .format(epoch_count, global_virtual_clock, round_duration))
-
+                                     .format(epoch_count, global_virtual_clock, round_duration))
 
                         numToSample = int(args.total_worker * args.overcommit)
 
                         if args.fixed_clients and last_sampled_clients:
                             sampledClientsRealTemp = last_sampled_clients
                         else:
-                            sampledClientsRealTemp = sorted(clientSampler.resampleClients(numToSample, cur_time=epoch_count))
+                            # hts： here is the client selection with UCB. Don't know why the authors call it "resample".
+                            # Why we need to do sample first before making Kuiper to do the selection?
+                            sampledClientsRealTemp = sorted(
+                                clientSampler.resampleClients(numToSample, cur_time=epoch_count))
 
                         last_sampled_clients = sampledClientsRealTemp
 
                         # remove dummy clients that we are not going to run
                         clientsToRun, exploredPendingWorkers, virtualClientClock, round_duration = prune_client_tasks(
-                                                            clientSampler, sampledClientsRealTemp,
-                                                            args.total_worker, global_virtual_clock
-                                                        )
+                            clientSampler, sampledClientsRealTemp,
+                            args.total_worker, global_virtual_clock
+                        )
                         sampledClientSet = set(clientsToRun)
 
                         logging.info("====Try to resample clients, final takes: \n {}"
-                                    .format(clientsToRun, ))#virtualClientClock))
+                                     .format(clientsToRun, ))  # virtualClientClock))
 
                         allocateClientToWorker = {}
-                        allocateClientDict = {rank:0 for rank in workers}
+                        allocateClientDict = {rank: 0 for rank in workers}
 
                         # for those device lakes < # of clients, we use round-bin for load balance
                         for c in clientsToRun:
                             clientDataSize = clientSampler.getClientSize(c)
-                            numOfBatches = int(math.ceil(clientDataSize/args.batch_size))
+                            numOfBatches = int(math.ceil(clientDataSize / args.batch_size))
 
                             if numOfBatches > args.upload_epoch:
-                                workerId = workers[(c-1)%len(workers)]
+                                workerId = workers[(c - 1) % len(workers)]
                             else:
                                 # pick the one w/ the least load
                                 workerId = sorted(allocateClientDict, key=allocateClientDict.get)[0]
@@ -424,16 +452,20 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                         # remove from the pending workers
                         del pendingWorkers[worker]
 
-                   # transformation of gradients if necessary
+                    # transformation of gradients if necessary
                     if gradient_controller is not None:
                         sumDeltaWeights = gradient_controller.update(sumDeltaWeights)
 
                     for idx, param in enumerate(model.parameters()):
                         if not args.test_only:
                             param.data += sumDeltaWeights[idx]
+                        # hts: appear to be corresponding to line 557 in learner "tmp_tensor"
                         dist.broadcast(tensor=(param.data.to(device=device)), src=0)
-
+                    # hts: appear to be corresponding to line 564 in learner "step_tensor". What exactly is this? Still not very clear!
+                    # clientIdsToRun seems to have structure like this [a,b1,b2,...,b_{workner_num}] and "b_1" is the largest client index that allocate to host 1.
+                    # but "a" is unclear to this reviewer what exactly it is.
                     dist.broadcast(tensor=torch.tensor(clientIdsToRun, dtype=torch.int).to(device=device), src=0)
+                    # hts: appear to be corresponding to line 571 in learner "clients_tensor"
                     dist.broadcast(tensor=torch.tensor(clientsList, dtype=torch.int).to(device=device), src=0)
                     last_model_parameters = [torch.clone(p.data) for p in model.parameters()]
 
@@ -450,12 +482,12 @@ def run(model, queue, param_q, stop_signal, clientSampler):
                     if args.noise_factor > 0:
                         median_reward = clientSampler.get_median_reward()
                         logging.info('For epoch: {}, median_reward: {}, dev: {}'
-                                        .format(epoch_count, median_reward, median_reward*args.noise_factor))
+                                     .format(epoch_count, median_reward, median_reward * args.noise_factor))
 
                     gc.collect()
 
                 # The training stop
-                if(epoch_count >= args.epochs):
+                if (epoch_count >= args.epochs):
                     stop_signal.put(1)
                     logging.info('Epoch is done: {}'.format(epoch_count))
                     break
@@ -472,16 +504,18 @@ def run(model, queue, param_q, stop_signal, clientSampler):
             print('Time up: {}, Stop Now!'.format(e_time - s_time))
             break
 
+
 def setup_seed(seed):
-     torch.manual_seed(seed)
-     torch.cuda.manual_seed_all(seed)
-     np.random.seed(seed)
-     random.seed(seed)
-     torch.backends.cudnn.deterministic = True
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
 
 # communication channel for client information
+# hts: queue for signal ; param_q for model parameters exchanging ; stop_signal for signaling the clients to stop training.
 def initiate_channel():
-
     queue = Queue()
     param = Queue()
     stop_or_not = Queue()
@@ -493,8 +527,8 @@ def initiate_channel():
 
     return manager
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     # Control the global random
     setup_seed(args.this_rank)
 
@@ -508,14 +542,13 @@ if __name__ == "__main__":
     logging.info("====Start to initialize dataset")
 
     model, train_dataset, test_dataset = init_dataset()
-
+    # hts: world size means number of learner process.
     world_size = len(str(args.learners).split('-')) + 1
+    # hts: the rank of master machine, which is 0. Used for Parallel GPU training
     this_rank = args.this_rank
 
     init_myprocesses(this_rank, world_size, model,
-                    q, param_q, stop_signal, run, args.backend
-                )
+                     q, param_q, stop_signal, run, args.backend
+                     )
 
     manager.shutdown()
-
-
