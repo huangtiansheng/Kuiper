@@ -31,7 +31,7 @@ Now we look into the "while loop" in line 203:
    by fetching from the queue via ``tmp_dict = queue.get()``
 2. Step into the "for loop" to iterate clients from a specific learner.  
    2.1. Apply the update from selected clients into `sumDeltaWeights`  
-   2.2. Use  `clientSampler.registerScore()` to update the client utility using `iteration_loss`(i.e., duration, to achieve statistics utility) and `virtualClientClock`(i.e., duration, to achieve system utility)  
+   2.2. Use  `clientSampler.registerScore()` to update the client utility using `iteration_loss`(i.e., empirical loss, to achieve statistics utility) and `virtualClientClock`(i.e., duration, to achieve system utility)  
    2.3. Exit the "For loop" after all the clients of a learner has been iterated.
 3. Aggregate the test results of different clients run in this leaner process, and visualize the results.
 4. Some operations based on "staleness". This staleness definition is quite confusing. I don't see why the process does not need a "waiting before synchronization" step. That is, do model aggregation and all kinds of synchronized jobs only when training results from all the clients received from queue? 
@@ -68,10 +68,10 @@ Then we look into the first "for loop" in line 457 :
 2. Step into the second "for loop" over `nextClientIds` (which indicates the scheduled clients on this worker process).
    But still, I cannot understand why the server only choose one client for each worker process in the first round 
    (see step 3 of `init_myprocesses(.)` of the server process)  
-2.1. Then, this learner process run the function ``run_client(.)`` for each scheduled clients on this learner process.
+   2.1. Then, this learner process run the function ``run_client(.)`` for each scheduled clients on this learner process.
    This could be understood as the real training of a virtual client (note, a learner process might run several clients' training process in each iteration)
    For now, we first skip the detailed inspect on ``run_client(.)``, and this content will be presented later.   
-2.2. Record all the statistics for each of the  clients who have been involved (e.g., `trainedModels`,`preTrainedLoss`, `trainSpeed`)After the second "for loop" (i.e., training of all allocated clients finished), do the following steps:
+   2.2. Record all the statistics for each of the  clients who have been involved (e.g., `trainedModels`,`preTrainedLoss`, `trainSpeed`)After the second "for loop" (i.e., training of all allocated clients finished), do the following steps:
 
 After the second "for loop" (i.e., training of all allocated clients finished), do the following steps:
 1. Put the statistics into ``queue`` towards the server.
